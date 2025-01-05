@@ -465,14 +465,15 @@ EXPLANATION: [Your explanation]
 def ocr_file(file_path: str, lang: str = 'en', use_gpu: bool = False, page_num: int = 0) -> str:
     ocr = PaddleOCR(use_angle_cls=True, lang=lang, use_gpu=use_gpu, page_num=page_num)
     result = ocr.ocr(file_path, cls=True)
-    for idx in range(len(result)):
-        res = result[idx]
+    lines = []
+    for res in result:
         if res == None: # Skip when empty result detected to avoid TypeError:NoneType
-            print(f"[DEBUG] Empty page {idx+1} detected, skip it.")
+            logging.debug(f"[DEBUG] Empty page detected, skip it.")
             continue
         for line in res:
-            print(line)
-    a = 1/0
+            lines.append(line[1][0])
+    
+    return " ".join(lines)
     
 async def main():
     try:
