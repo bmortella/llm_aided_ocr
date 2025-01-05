@@ -10,7 +10,6 @@ pdf2image
 pillow
 pytesseract
 python-decouple
-ruff
-scikit-learn
 tiktoken
 transformers
+ollama
