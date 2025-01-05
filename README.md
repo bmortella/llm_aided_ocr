@@ -14,8 +14,7 @@ To see what the LLM-Aided OCR Project can do, check out these example outputs:
 
 ## Features
 
-- PDF to image conversion
-- OCR using Tesseract
+- OCR using PaddleOCR
 - Advanced error correction using LLMs (local or API-based)
 - Smart text chunking for efficient processing
 - Markdown formatting option
@@ -24,24 +23,8 @@ To see what the LLM-Aided OCR Project can do, check out these example outputs:
 - Support for both local LLMs and cloud-based API providers (OpenAI, Anthropic)
 - Asynchronous processing for improved performance
 - Detailed logging for process tracking and debugging
-- GPU acceleration for local LLM inference
 
 ## Detailed Technical Overview
-
-### PDF Processing and OCR
-
-1. **PDF to Image Conversion**
-   - Function: `convert_pdf_to_images()`
-   - Uses `pdf2image` library to convert PDF pages into images
-   - Supports processing a subset of pages with `max_pages` and `skip_first_n_pages` parameters
-
-2. **OCR Processing**
-   - Function: `ocr_image()`
-   - Utilizes `pytesseract` for text extraction
-   - Includes image preprocessing with `preprocess_image()` function:
-     - Converts image to grayscale
-     - Applies binary thresholding using Otsu's method
-     - Performs dilation to enhance text clarity
 
 ### Text Processing Pipeline
 
@@ -76,8 +59,7 @@ To see what the LLM-Aided OCR Project can do, check out these example outputs:
 
 2. **Local LLM Handling**
    - Function: `generate_completion_from_local_llm()`
-   - Uses `llama_cpp` library for local LLM inference
-   - Supports custom grammars for structured output
+   - Uses `ollama` for local LLM inference
 
 3. **API-based LLM Handling**
    - Functions: `generate_completion_from_claude()` and `generate_completion_from_openai()`

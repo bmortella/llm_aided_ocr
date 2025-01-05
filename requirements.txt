@@ -1,12 +1,9 @@
 anthropic
-numpy
-nvgpu
 openai
-opencv-python-headless
-pdf2image
-pillow
-pytesseract
 python-decouple
 tiktoken
 transformers
 ollama
+paddlepaddle
+paddleocr>=2.0.1
+PyMuPDF

@@ -3,26 +3,16 @@ import traceback
 import asyncio
 import re
 import logging
-from concurrent.futures import ThreadPoolExecutor
 import warnings
 from typing import List, Tuple, Optional
-from pdf2image import convert_from_path
-import pytesseract
 import tiktoken
-import numpy as np
-from PIL import Image
 from decouple import Config as DecoupleConfig, RepositoryEnv
-import cv2
 from transformers import AutoTokenizer
 from openai import AsyncOpenAI
 from anthropic import AsyncAnthropic
 import ollama
-try:
-    import nvgpu
-    GPU_AVAILABLE = True
-except ImportError:
-    GPU_AVAILABLE = False
-    
+from paddleocr import PaddleOCR
+
 # Configuration
 config = DecoupleConfig(RepositoryEnv('.env'))
 
@@ -45,28 +35,9 @@ openai_client = AsyncOpenAI(api_key=OPENAI_API_KEY)
 warnings.filterwarnings("ignore", category=FutureWarning)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-# GPU Check
-def is_gpu_available():
-    if not GPU_AVAILABLE:
-        logging.warning("GPU support not available: nvgpu module not found")
-        return {"gpu_found": False, "num_gpus": 0, "first_gpu_vram": 0, "total_vram": 0, "error": "nvgpu module not found"}
-    try:
-        gpu_info = nvgpu.gpu_info()
-        num_gpus = len(gpu_info)
-        if num_gpus == 0:
-            logging.warning("No GPUs found on the system")
-            return {"gpu_found": False, "num_gpus": 0, "first_gpu_vram": 0, "total_vram": 0}
-        first_gpu_vram = gpu_info[0]['mem_total']
-        total_vram = sum(gpu['mem_total'] for gpu in gpu_info)
-        logging.info(f"GPU(s) found: {num_gpus}, Total VRAM: {total_vram} MB")
-        return {"gpu_found": True, "num_gpus": num_gpus, "first_gpu_vram": first_gpu_vram, "total_vram": total_vram, "gpu_info": gpu_info}
-    except Exception as e:
-        logging.error(f"Error checking GPU availability: {e}")
-        return {"gpu_found": False, "num_gpus": 0, "first_gpu_vram": 0, "total_vram": 0, "error": str(e)}
-
 # Model Download
-async def download_models():
-    resp = ollama.pull('llama3.1')
+def download_model():
+    resp = ollama.pull(DEFAULT_LOCAL_MODEL_NAME)
     return resp
 
 # API Interaction Functions
@@ -299,31 +270,6 @@ async def generate_completion_from_local_llm(llm_model_name: str, input_prompt: 
         logging.info(f"Completed text completion. Beginning of generated text: \n'{generated_text[:150]}'...")
         return generated_text
 
-# Image Processing Functions
-def preprocess_image(image):
-    gray = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2GRAY)
-    gray = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)[1]
-    kernel = np.ones((1, 1), np.uint8)
-    gray = cv2.dilate(gray, kernel, iterations=1)
-    return Image.fromarray(gray)
-
-def convert_pdf_to_images(input_pdf_file_path: str, max_pages: int = 0, skip_first_n_pages: int = 0) -> List[Image.Image]:
-    logging.info(f"Processing PDF file {input_pdf_file_path}")
-    if max_pages == 0:
-        last_page = None
-        logging.info("Converting all pages to images...")
-    else:
-        last_page = skip_first_n_pages + max_pages
-        logging.info(f"Converting pages {skip_first_n_pages + 1} to {last_page}")
-    first_page = skip_first_n_pages + 1  # pdf2image uses 1-based indexing
-    images = convert_from_path(input_pdf_file_path, first_page=first_page, last_page=last_page)
-    logging.info(f"Converted {len(images)} pages from PDF file to images.")
-    return images
-
-def ocr_image(image):
-    preprocessed_image = preprocess_image(image)
-    return pytesseract.image_to_string(preprocessed_image)
-
 async def process_chunk(chunk: str, prev_context: str, chunk_index: int, total_chunks: int, reformat_as_markdown: bool, suppress_headers_and_page_numbers: bool) -> Tuple[str, str]:
     logging.info(f"Processing chunk {chunk_index + 1}/{total_chunks} (length: {len(chunk):,} characters)")
     
@@ -516,44 +462,54 @@ EXPLANATION: [Your explanation]
         logging.error(f"Raw response: {response}")
         return None, None
     
+def ocr_file(file_path: str, lang: str = 'en', use_gpu: bool = False, page_num: int = 0) -> str:
+    ocr = PaddleOCR(use_angle_cls=True, lang=lang, use_gpu=use_gpu, page_num=page_num)
+    result = ocr.ocr(file_path, cls=True)
+    for idx in range(len(result)):
+        res = result[idx]
+        if res == None: # Skip when empty result detected to avoid TypeError:NoneType
+            print(f"[DEBUG] Empty page {idx+1} detected, skip it.")
+            continue
+        for line in res:
+            print(line)
+    a = 1/0
+    
 async def main():
     try:
         # Suppress HTTP request logs
         logging.getLogger("httpx").setLevel(logging.WARNING)
-        input_pdf_file_path = '160301289-Warren-Buffett-Katharine-Graham-Letter.pdf'
-        max_test_pages = 0
-        skip_first_n_pages = 0
+        input_file_path = 'FILE.png'
+        page_num = 0 # first n pages or 0 for all pages
         reformat_as_markdown = True
         suppress_headers_and_page_numbers = True
         
         # Download the model if using local LLM
         if USE_LOCAL_LLM:
-            download_status = await download_models()
+            download_status = download_model()
             logging.info(f"Model download status: {download_status}")
             logging.info(f"Using Local LLM with Model: {DEFAULT_LOCAL_MODEL_NAME}")
         else:
             logging.info(f"Using API for completions: {API_PROVIDER}")
             logging.info(f"Using OpenAI model for embeddings: {OPENAI_EMBEDDING_MODEL}")
 
-        base_name = os.path.splitext(input_pdf_file_path)[0]
+        base_name = os.path.splitext(input_file_path)[0]
         output_extension = '.md' if reformat_as_markdown else '.txt'
         
         raw_ocr_output_file_path = f"{base_name}__raw_ocr_output.txt"
         llm_corrected_output_file_path = base_name + '_llm_corrected' + output_extension
 
-        list_of_scanned_images = convert_pdf_to_images(input_pdf_file_path, max_test_pages, skip_first_n_pages)
-        logging.info(f"Tesseract version: {pytesseract.get_tesseract_version()}")
-        logging.info("Extracting text from converted pages...")
-        with ThreadPoolExecutor() as executor:
-            list_of_extracted_text_strings = list(executor.map(ocr_image, list_of_scanned_images))
-        logging.info("Done extracting text from converted pages.")
-        raw_ocr_output = "\n".join(list_of_extracted_text_strings)
+        # list_of_scanned_images = convert_pdf_to_images(input_pdf_file_path, max_test_pages, skip_first_n_pages)
+        # logging.info("Extracting text from converted pages...")
+        # with ThreadPoolExecutor() as executor:
+        #     list_of_extracted_text_strings = list(executor.map(ocr_image, list_of_scanned_images))
+        extracted_text = ocr_file(input_file_path, page_num=page_num)
+        logging.info("Done extracting text from file.")
         with open(raw_ocr_output_file_path, "w") as f:
-            f.write(raw_ocr_output)
+            f.write(extracted_text)
         logging.info(f"Raw OCR output written to: {raw_ocr_output_file_path}")
 
         logging.info("Processing document...")
-        final_text = await process_document(list_of_extracted_text_strings, reformat_as_markdown, suppress_headers_and_page_numbers)            
+        final_text = await process_document(extracted_text, reformat_as_markdown, suppress_headers_and_page_numbers)            
         cleaned_text = remove_corrected_text_header(final_text)
         
         # Save the LLM corrected output
@@ -566,13 +522,13 @@ async def main():
         else:
             logging.warning("final_text is empty or not defined.")
 
-        logging.info(f"Done processing {input_pdf_file_path}.")
+        logging.info(f"Done processing {input_file_path}.")
         logging.info("\nSee output files:")
         logging.info(f" Raw OCR: {raw_ocr_output_file_path}")
         logging.info(f" LLM Corrected: {llm_corrected_output_file_path}")
 
         # Perform a final quality check
-        quality_score, explanation = await assess_output_quality(raw_ocr_output, final_text)
+        quality_score, explanation = await assess_output_quality(extracted_text, final_text)
         if quality_score is not None:
             logging.info(f"Final quality score: {quality_score}/100")
             logging.info(f"Explanation: {explanation}")
