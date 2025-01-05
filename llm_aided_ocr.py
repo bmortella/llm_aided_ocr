@@ -292,42 +292,17 @@ async def generate_completion_from_local_llm(llm_model_name: str, input_prompt: 
                 logging.error(f"An error occurred while processing a chunk: {e}")
         return " ".join(results)
     else:
-        grammar_file_string_lower = grammar_file_string.lower() if grammar_file_string else ""
-        if grammar_file_string_lower:
-            list_of_grammar_files = glob.glob("./grammar_files/*.gbnf")
-            matching_grammar_files = [x for x in list_of_grammar_files if grammar_file_string_lower in os.path.splitext(os.path.basename(x).lower())[0]]
-            if len(matching_grammar_files) == 0:
-                logging.error(f"No grammar file found matching: {grammar_file_string}")
-                raise FileNotFoundError
-            grammar_file_path = max(matching_grammar_files, key=os.path.getmtime)
-            logging.info(f"Loading selected grammar file: '{grammar_file_path}'")
-            llama_grammar = LlamaGrammar.from_file(grammar_file_path)
-            # output = llm(
-            #     prompt=input_prompt,
-            #     max_tokens=adjusted_max_tokens,
-            #     temperature=temperature,
-            #     grammar=llama_grammar
-            # )
-        else:
-            output = ollama.generate(
-                model=llm_model_name,
-                prompt=input_prompt,
-                options={
-                    "num_predict": adjusted_max_tokens,
-                    "temperature":temperature
-                }
-            )
-        generated_text = output['choices'][0]['text']
-        if grammar_file_string == 'json':
-            generated_text = generated_text.encode('unicode_escape').decode()
-        finish_reason = str(output['choices'][0]['finish_reason'])
-        llm_model_usage_json = json.dumps(output['usage'])
-        logging.info(f"Completed text completion in {output['usage']['total_time']:.2f} seconds. Beginning of generated text: \n'{generated_text[:150]}'...")
-        return {
-            "generated_text": generated_text,
-            "finish_reason": finish_reason,
-            "llm_model_usage_json": llm_model_usage_json
-        }
+        output = ollama.generate(
+            model=llm_model_name,
+            prompt=input_prompt,
+            options={
+                "num_predict": adjusted_max_tokens,
+                "temperature":temperature
+            }
+        )
+        generated_text = output['response']
+        logging.info(f"Completed text completion. Beginning of generated text: \n'{generated_text[:150]}'...")
+        return generated_text
 
 # Image Processing Functions
 def preprocess_image(image):
