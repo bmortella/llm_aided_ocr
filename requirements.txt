@@ -1,7 +1,6 @@
 anthropic
 filelock
 langdetect
-llama-cpp-python
 numpy
 nvgpu
 openai

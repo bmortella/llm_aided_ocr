@@ -1,16 +1,13 @@
 import os
-import glob
 import traceback
 import asyncio
-import json
 import re
 import logging
 from concurrent.futures import ThreadPoolExecutor
 import warnings
-from typing import List, Dict, Tuple, Optional
+from typing import List, Tuple, Optional
 from pdf2image import convert_from_path
 import pytesseract
-from llama_cpp import Llama, LlamaGrammar
 import tiktoken
 import numpy as np
 from PIL import Image
@@ -267,7 +264,7 @@ async def generate_completion_from_openai(prompt: str, max_tokens: int = 5000) -
             logging.error(f"An error occurred while requesting from OpenAI API: {e}")
             return None
 
-async def generate_completion_from_local_llm(llm_model_name: str, input_prompt: str, number_of_tokens_to_generate: int = 100, temperature: float = 0.7, grammar_file_string: str = None):
+async def generate_completion_from_local_llm(llm_model_name: str, input_prompt: str, number_of_tokens_to_generate: int = 100, temperature: float = 0.7):
     logging.info(f"Starting text completion using model: '{llm_model_name}' for input prompt: '{input_prompt}'")
     #llm = load_model(llm_model_name)
     prompt_tokens = estimate_tokens(input_prompt, llm_model_name)
