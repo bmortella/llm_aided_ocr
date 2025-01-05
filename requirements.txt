@@ -1,6 +1,4 @@
 anthropic
-filelock
-langdetect
 numpy
 nvgpu
 openai

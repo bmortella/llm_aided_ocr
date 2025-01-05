@@ -13,7 +13,6 @@ import numpy as np
 from PIL import Image
 from decouple import Config as DecoupleConfig, RepositoryEnv
 import cv2
-from filelock import FileLock, Timeout
 from transformers import AutoTokenizer
 from openai import AsyncOpenAI
 from anthropic import AsyncAnthropic
@@ -266,7 +265,6 @@ async def generate_completion_from_openai(prompt: str, max_tokens: int = 5000) -
 
 async def generate_completion_from_local_llm(llm_model_name: str, input_prompt: str, number_of_tokens_to_generate: int = 100, temperature: float = 0.7):
     logging.info(f"Starting text completion using model: '{llm_model_name}' for input prompt: '{input_prompt}'")
-    #llm = load_model(llm_model_name)
     prompt_tokens = estimate_tokens(input_prompt, llm_model_name)
     adjusted_max_tokens = min(number_of_tokens_to_generate, LOCAL_LLM_CONTEXT_SIZE_IN_TOKENS - prompt_tokens - TOKEN_BUFFER)
     if adjusted_max_tokens <= 0:
