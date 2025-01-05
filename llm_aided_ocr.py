@@ -73,52 +73,6 @@ async def download_models():
     resp = ollama.pull('llama3.1')
     return resp
 
-# Model Loading
-# def load_model(llm_model_name: str, raise_exception: bool = True):
-#     global USE_VERBOSE
-#     try:
-#         current_file_path = os.path.abspath(__file__)
-#         base_dir = os.path.dirname(current_file_path)
-#         models_dir = os.path.join(base_dir, 'models')
-#         matching_files = glob.glob(os.path.join(models_dir, f"{llm_model_name}*"))
-#         if not matching_files:
-#             logging.error(f"Error: No model file found matching: {llm_model_name}")
-#             raise FileNotFoundError
-#         model_file_path = max(matching_files, key=os.path.getmtime)
-#         logging.info(f"Loading model: {model_file_path}")
-#         try:
-#             logging.info("Attempting to load model with GPU acceleration...")
-#             model_instance = Llama(
-#                 model_path=model_file_path,
-#                 n_ctx=LOCAL_LLM_CONTEXT_SIZE_IN_TOKENS,
-#                 verbose=USE_VERBOSE,
-#                 n_gpu_layers=-1
-#             )
-#             logging.info("Model loaded successfully with GPU acceleration.")
-#         except Exception as gpu_e:
-#             logging.warning(f"Failed to load model with GPU acceleration: {gpu_e}")
-#             logging.info("Falling back to CPU...")
-#             try:
-#                 model_instance = Llama(
-#                     model_path=model_file_path,
-#                     n_ctx=LOCAL_LLM_CONTEXT_SIZE_IN_TOKENS,
-#                     verbose=USE_VERBOSE,
-#                     n_gpu_layers=0
-#                 )
-#                 logging.info("Model loaded successfully with CPU.")
-#             except Exception as cpu_e:
-#                 logging.error(f"Failed to load model with CPU: {cpu_e}")
-#                 if raise_exception:
-#                     raise
-#                 return None
-#         return model_instance
-#     except Exception as e:
-#         logging.error(f"Exception occurred while loading the model: {e}")
-#         traceback.print_exc()
-#         if raise_exception:
-#             raise
-#         return None
-
 # API Interaction Functions
 async def generate_completion(prompt: str, max_tokens: int = 5000) -> Optional[str]:
     if USE_LOCAL_LLM:
