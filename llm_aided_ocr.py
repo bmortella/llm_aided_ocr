@@ -1,26 +1,22 @@
 import os
-import glob
 import traceback
 import asyncio
-import json
 import re
-import urllib.request
 import logging
 from concurrent.futures import ThreadPoolExecutor
 import warnings
-from typing import List, Dict, Tuple, Optional
+from typing import List, Tuple, Optional
 from pdf2image import convert_from_path
 import pytesseract
-from llama_cpp import Llama, LlamaGrammar
 import tiktoken
 import numpy as np
 from PIL import Image
 from decouple import Config as DecoupleConfig, RepositoryEnv
 import cv2
-from filelock import FileLock, Timeout
 from transformers import AutoTokenizer
 from openai import AsyncOpenAI
 from anthropic import AsyncAnthropic
+import ollama
 try:
     import nvgpu
     GPU_AVAILABLE = True
@@ -41,7 +37,7 @@ TOKEN_CUSHION = 300 # Don't use the full max tokens to avoid hitting the limit
 OPENAI_COMPLETION_MODEL = config.get("OPENAI_COMPLETION_MODEL", default="gpt-4o-mini", cast=str)
 OPENAI_EMBEDDING_MODEL = config.get("OPENAI_EMBEDDING_MODEL", default="text-embedding-3-small", cast=str)
 OPENAI_MAX_TOKENS = 12000  # Maximum allowed tokens for OpenAI API
-DEFAULT_LOCAL_MODEL_NAME = "Llama-3.1-8B-Lexi-Uncensored_Q5_fixedrope.gguf"
+DEFAULT_LOCAL_MODEL_NAME = "llama3.1"
 LOCAL_LLM_CONTEXT_SIZE_IN_TOKENS = 2048
 USE_VERBOSE = False
 
@@ -69,88 +65,9 @@ def is_gpu_available():
         return {"gpu_found": False, "num_gpus": 0, "first_gpu_vram": 0, "total_vram": 0, "error": str(e)}
 
 # Model Download
-async def download_models() -> Tuple[List[str], List[Dict[str, str]]]:
-    download_status = []    
-    model_url = "https://huggingface.co/Orenguteng/Llama-3.1-8B-Lexi-Uncensored-GGUF/resolve/main/Llama-3.1-8B-Lexi-Uncensored_Q5_fixedrope.gguf"
-    model_name = os.path.basename(model_url)
-    current_file_path = os.path.abspath(__file__)
-    base_dir = os.path.dirname(current_file_path)
-    models_dir = os.path.join(base_dir, 'models')
-    
-    os.makedirs(models_dir, exist_ok=True)
-    lock = FileLock(os.path.join(models_dir, "download.lock"))
-    status = {"url": model_url, "status": "success", "message": "File already exists."}
-    filename = os.path.join(models_dir, model_name)
-    
-    try:
-        with lock.acquire(timeout=1200):
-            if not os.path.exists(filename):
-                logging.info(f"Downloading model {model_name} from {model_url}...")
-                urllib.request.urlretrieve(model_url, filename)
-                file_size = os.path.getsize(filename) / (1024 * 1024)
-                if file_size < 100:
-                    os.remove(filename)
-                    status["status"] = "failure"
-                    status["message"] = f"Downloaded file is too small ({file_size:.2f} MB), probably not a valid model file."
-                    logging.error(f"Error: {status['message']}")
-                else:
-                    logging.info(f"Successfully downloaded: {filename} (Size: {file_size:.2f} MB)")
-            else:
-                logging.info(f"Model file already exists: {filename}")
-    except Timeout:
-        logging.error(f"Error: Could not acquire lock for downloading {model_name}")
-        status["status"] = "failure"
-        status["message"] = "Could not acquire lock for downloading."
-    
-    download_status.append(status)
-    logging.info("Model download process completed.")
-    return [model_name], download_status
-
-# Model Loading
-def load_model(llm_model_name: str, raise_exception: bool = True):
-    global USE_VERBOSE
-    try:
-        current_file_path = os.path.abspath(__file__)
-        base_dir = os.path.dirname(current_file_path)
-        models_dir = os.path.join(base_dir, 'models')
-        matching_files = glob.glob(os.path.join(models_dir, f"{llm_model_name}*"))
-        if not matching_files:
-            logging.error(f"Error: No model file found matching: {llm_model_name}")
-            raise FileNotFoundError
-        model_file_path = max(matching_files, key=os.path.getmtime)
-        logging.info(f"Loading model: {model_file_path}")
-        try:
-            logging.info("Attempting to load model with GPU acceleration...")
-            model_instance = Llama(
-                model_path=model_file_path,
-                n_ctx=LOCAL_LLM_CONTEXT_SIZE_IN_TOKENS,
-                verbose=USE_VERBOSE,
-                n_gpu_layers=-1
-            )
-            logging.info("Model loaded successfully with GPU acceleration.")
-        except Exception as gpu_e:
-            logging.warning(f"Failed to load model with GPU acceleration: {gpu_e}")
-            logging.info("Falling back to CPU...")
-            try:
-                model_instance = Llama(
-                    model_path=model_file_path,
-                    n_ctx=LOCAL_LLM_CONTEXT_SIZE_IN_TOKENS,
-                    verbose=USE_VERBOSE,
-                    n_gpu_layers=0
-                )
-                logging.info("Model loaded successfully with CPU.")
-            except Exception as cpu_e:
-                logging.error(f"Failed to load model with CPU: {cpu_e}")
-                if raise_exception:
-                    raise
-                return None
-        return model_instance
-    except Exception as e:
-        logging.error(f"Exception occurred while loading the model: {e}")
-        traceback.print_exc()
-        if raise_exception:
-            raise
-        return None
+async def download_models():
+    resp = ollama.pull('llama3.1')
+    return resp
 
 # API Interaction Functions
 async def generate_completion(prompt: str, max_tokens: int = 5000) -> Optional[str]:
@@ -169,7 +86,7 @@ def get_tokenizer(model_name: str):
         return tiktoken.encoding_for_model(model_name)
     elif model_name.lower().startswith("claude-"):
         return AutoTokenizer.from_pretrained("EleutherAI/gpt-neox-20b", clean_up_tokenization_spaces=False)
-    elif model_name.lower().startswith("llama-"):
+    elif model_name.lower().startswith("llama"):
         return AutoTokenizer.from_pretrained("huggyllama/llama-7b", clean_up_tokenization_spaces=False)
     else:
         raise ValueError(f"Unsupported model: {model_name}")
@@ -346,9 +263,8 @@ async def generate_completion_from_openai(prompt: str, max_tokens: int = 5000) -
             logging.error(f"An error occurred while requesting from OpenAI API: {e}")
             return None
 
-async def generate_completion_from_local_llm(llm_model_name: str, input_prompt: str, number_of_tokens_to_generate: int = 100, temperature: float = 0.7, grammar_file_string: str = None):
+async def generate_completion_from_local_llm(llm_model_name: str, input_prompt: str, number_of_tokens_to_generate: int = 100, temperature: float = 0.7):
     logging.info(f"Starting text completion using model: '{llm_model_name}' for input prompt: '{input_prompt}'")
-    llm = load_model(llm_model_name)
     prompt_tokens = estimate_tokens(input_prompt, llm_model_name)
     adjusted_max_tokens = min(number_of_tokens_to_generate, LOCAL_LLM_CONTEXT_SIZE_IN_TOKENS - prompt_tokens - TOKEN_BUFFER)
     if adjusted_max_tokens <= 0:
@@ -357,50 +273,31 @@ async def generate_completion_from_local_llm(llm_model_name: str, input_prompt: 
         results = []
         for chunk in chunks:
             try:
-                output = llm(
+                output = ollama.generate(
+                    model=llm_model_name,
                     prompt=chunk,
-                    max_tokens=LOCAL_LLM_CONTEXT_SIZE_IN_TOKENS - TOKEN_CUSHION,
-                    temperature=temperature,
+                    options= {
+                        "num_predict": LOCAL_LLM_CONTEXT_SIZE_IN_TOKENS - TOKEN_CUSHION,
+                        "temperature": temperature
+                    },
                 )
-                results.append(output['choices'][0]['text'])
-                logging.info(f"Chunk processed. Output tokens: {output['usage']['completion_tokens']:,}")
+                results.append(output['response'])
+                logging.info(f"Chunk processed. Output tokens: {output['eval_count']}")
             except Exception as e:
                 logging.error(f"An error occurred while processing a chunk: {e}")
         return " ".join(results)
     else:
-        grammar_file_string_lower = grammar_file_string.lower() if grammar_file_string else ""
-        if grammar_file_string_lower:
-            list_of_grammar_files = glob.glob("./grammar_files/*.gbnf")
-            matching_grammar_files = [x for x in list_of_grammar_files if grammar_file_string_lower in os.path.splitext(os.path.basename(x).lower())[0]]
-            if len(matching_grammar_files) == 0:
-                logging.error(f"No grammar file found matching: {grammar_file_string}")
-                raise FileNotFoundError
-            grammar_file_path = max(matching_grammar_files, key=os.path.getmtime)
-            logging.info(f"Loading selected grammar file: '{grammar_file_path}'")
-            llama_grammar = LlamaGrammar.from_file(grammar_file_path)
-            output = llm(
-                prompt=input_prompt,
-                max_tokens=adjusted_max_tokens,
-                temperature=temperature,
-                grammar=llama_grammar
-            )
-        else:
-            output = llm(
-                prompt=input_prompt,
-                max_tokens=adjusted_max_tokens,
-                temperature=temperature
-            )
-        generated_text = output['choices'][0]['text']
-        if grammar_file_string == 'json':
-            generated_text = generated_text.encode('unicode_escape').decode()
-        finish_reason = str(output['choices'][0]['finish_reason'])
-        llm_model_usage_json = json.dumps(output['usage'])
-        logging.info(f"Completed text completion in {output['usage']['total_time']:.2f} seconds. Beginning of generated text: \n'{generated_text[:150]}'...")
-        return {
-            "generated_text": generated_text,
-            "finish_reason": finish_reason,
-            "llm_model_usage_json": llm_model_usage_json
-        }
+        output = ollama.generate(
+            model=llm_model_name,
+            prompt=input_prompt,
+            options={
+                "num_predict": adjusted_max_tokens,
+                "temperature":temperature
+            }
+        )
+        generated_text = output['response']
+        logging.info(f"Completed text completion. Beginning of generated text: \n'{generated_text[:150]}'...")
+        return generated_text
 
 # Image Processing Functions
 def preprocess_image(image):
@@ -631,7 +528,7 @@ async def main():
         
         # Download the model if using local LLM
         if USE_LOCAL_LLM:
-            _, download_status = await download_models()
+            download_status = await download_models()
             logging.info(f"Model download status: {download_status}")
             logging.info(f"Using Local LLM with Model: {DEFAULT_LOCAL_MODEL_NAME}")
         else:
